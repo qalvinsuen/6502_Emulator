@@ -10,7 +10,7 @@
     Little Endian
     256-Byte Page Size
     [$0000 - $00FF] Page Zero (RAM)
-        Cache, for frequently referenced variables and uses special 1-byte addresses
+        Cache, for frequently referenced variables and uses 8-bit instead of 16-bit addresses
     [$0100 - $01FF] Page One (RAM)
         System Stack
     [$0200 - $FFF9] User Programmable Memory (RAM/ROM)
@@ -61,7 +61,7 @@ typedef struct CPU
     uint8_t N : 1; //Negative
     
     /*Address Bus Register */
-    uint32_t ABR;
+    uint16_t ABR;
     
     /*For Testing*/
     int CycleCount = 0;
@@ -99,6 +99,9 @@ typedef struct CPU
         CycleCount++;
         return data;
     }
+    uint16_t FetchWord(MEM_6502& mem){
+        return (FetchByte(mem) | (FetchByte(mem) << 8));
+    }
     /*
         Read
             Use when reading data from memory using address given as operand or read from memory
@@ -107,6 +110,9 @@ typedef struct CPU
         uint8_t data = mem.Data[addr];
         CycleCount++;
         return data;
+    }
+    uint16_t ReadWord(MEM_6502& mem, uint16_t addr){
+        return (ReadByte(mem, addr) | (ReadByte(mem, addr+1) << 8));
     }
     void SetFlagsLDA(){
         N = (A & 0b10000000) >> 7;
@@ -123,15 +129,28 @@ typedef struct CPU
                 SetFlagsLDA();
                 break;
             case LDA_ZP:
-                ABR = 0x00FF & FetchByte(mem); //Clear ABR and store LSB
+                ABR = 0xFF & FetchByte(mem); //Clear ABR and store LSB
+                A = ReadByte(mem, ABR);
+                SetFlagsLDA();
+                break;
+            case LDA_ZPX:
+                ABR = (0xFF & FetchByte(mem)) + X ; //Clear ABR and store LSB, then add value in X
+                CycleCount++;
                 A = ReadByte(mem, ABR);
                 SetFlagsLDA();
                 break;
             case LDA_AB:
-                ABR = 0xFFFF & FetchByte(mem); //Clear ABR and store LSB
-                ABR = ABR | (FetchByte(mem) << 8); //Store MSB
+                ABR = FetchWord(mem);
                 A = ReadByte(mem, ABR);
                 SetFlagsLDA();
+                break;
+            case JMP_AB:
+                ABR = FetchWord(mem);
+                PC = ABR;
+                break;
+            case JMP_IND:
+                ABR = FetchWord(mem);
+                PC = ReadWord(mem, ABR);
                 break;
             default:
                 printf("Instruction Not Found\n");
@@ -146,20 +165,22 @@ int main(){
     CPU_6502 cpu;
     cpu.Reset(mem);
     /*
-        Load Example
-        - Store value 0x3E at 8-bit address 0x08 (zero page address)
-        - Store LDA_ZP instruction and 8-bit address 0x08 at power-on reset address
-        - Use LDA_ZP to load the value from the zero page address into the accumulator
-        - The operation should take 3 machines cycles, one per memory access
-            (read opcode byte, read address byte, read byte at address)
+        Test Program
+            JMP_AB  $0100
+            JMP_IND $0200
     */
-    int8_t val = 0x3E;
-    int8_t zpaddr = 0x08;
-    mem.Data[zpaddr] = val;
-    mem.Data[0xFFFC] = (uint8_t) Instruction::LDA_ZP;
-    mem.Data[0xFFFD] = zpaddr;
+    // Power-On Reset, JMP
+    mem.Data[0xFFFC] = (uint8_t) Instruction::JMP_AB;
+    mem.Data[0xFFFD] = 0x00;
+    mem.Data[0xFFFE] = 0x01;
+    mem.Data[0x0100] = (uint8_t) Instruction::JMP_IND;
+    mem.Data[0x0101] = 0x00;
+    mem.Data[0x0102] = 0x02;
+    mem.Data[0x0200] = 0x34;
+    mem.Data[0x0201] = 0x12;
     cpu.Execute(mem);
-    printf("The Accumulator value at is 0x%x.\n", cpu.A);
-    printf("CPU running for %d machine cycles.\n", cpu.CycleCount);
+    cpu.Execute(mem);
+    printf("PC at 0x%x.\n", cpu.PC);
+    printf("CPU ran for %d machine cycles.\n", cpu.CycleCount);
     return 0;
 }

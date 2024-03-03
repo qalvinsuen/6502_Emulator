@@ -58,7 +58,8 @@ enum Instruction {
     ROL,
     ROR,
     // Jumps and Calls
-    JMP,
+    JMP_AB = 0x4C,
+    JMP_IND = 0x6C,
     JSR,
     RTS,
     // Branches
